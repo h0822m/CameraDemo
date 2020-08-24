@@ -9,20 +9,15 @@
     tools:context=".MainActivity">
 
     <Button
-        android:id="@+id/camera_btn"
-        android:layout_width="80dp"
-        android:layout_height="40dp"
-        android:layout_marginTop="40dp"
-        android:text="点击拍照"
-        android:background="@color/colorAccent"
-        app:layout_constraintStart_toStartOf="parent"
+        android:id="@+id/jump_btn"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="点我拍照"
+        android:textColor="@color/white"
+        android:background="@color/red"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent"/>
-
-    <androidx.camera.view.PreviewView
-        android:id="@+id/previewView"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:background="@color/white"/>
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"/>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

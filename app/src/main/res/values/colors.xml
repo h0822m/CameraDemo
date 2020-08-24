@@ -6,4 +6,9 @@
     <color name="white">#FFFFFF</color>
     <color name="black">#000000</color>
     <color name="red">#CB1B45</color>
+
+    <!---相机摄像头转换按钮-->
+    <color name="icActive">#FFFFFFFF</color>
+    <color name="icFocused">#DDFFFFFF</color>
+    <color name="icPressed">#AAFFFFFF</color>
 </resources>
