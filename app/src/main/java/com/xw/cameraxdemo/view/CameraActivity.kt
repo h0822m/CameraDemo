@@ -1,14 +1,18 @@
 package com.xw.cameraxdemo.view
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.DisplayMetrics
 import android.util.Log
+import android.view.Surface
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.*
+import androidx.camera.extensions.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
@@ -21,6 +25,9 @@ import java.util.*
 import com.xw.cameraxdemo.R
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 typealias LumListener = (lum: Double) -> Unit
 
@@ -42,12 +49,17 @@ class CameraActivity: AppCompatActivity() {
     private lateinit var photoOutputDirectory: File
     private lateinit var videoOutputDirectory: File
     private lateinit var cameraExecutor: ExecutorService
+    // 是否拍照
+    private var isTakePicture = false
 
     companion object {
         private const val TAG = "CameraXBasic"
         private const val FILENAME_FORMAT = "yyyy-MM-dd-HH-mm-ss-SSS"
         private const val REQUEST_CODE_PERMISSIONS = 10
         private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
+        // 宽高比
+        private const val RATIO_4_3_VALUE = 4.0 / 3.0
+        private const val RATIO_16_9_VALUE = 16.0 / 9.0
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -72,17 +84,21 @@ class CameraActivity: AppCompatActivity() {
         cameraRecordView.setOnPictureAndRecordListener(object : OnPictureAndRecordListener {
 
             override fun onTakePicture() {
+                isTakePicture = true
                 // 点击拍照
                 takePhoto()
             }
 
             override fun onRecordVideo() {
+                isTakePicture = false
                 // 长按录制视频
                 takeVideo()
             }
 
+            @SuppressLint("RestrictedApi")
             override fun onFinish() {
-
+                // 视频录制完成
+                videoCapture?.stopRecording()
             }
 
         })
@@ -105,19 +121,70 @@ class CameraActivity: AppCompatActivity() {
         }
     }
 
+    @SuppressLint("RestrictedApi")
     private fun starCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
 
         cameraProviderFuture.addListener(Runnable {
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
 
-            preView = Preview.Builder()
+            // 获取屏幕的分辨率
+            val displayMetrics = DisplayMetrics()
+            previewView?.display?.getRealMetrics(displayMetrics)
+
+            // 获取宽高比
+            val screenAspectRatio = aspectRatio(displayMetrics.widthPixels, displayMetrics.heightPixels)
+
+            // 旋转方向
+            val rotation = previewView?.display?.rotation ?: Surface.ROTATION_0
+
+            if (cameraProvider == null) {
+                Toast.makeText(this, "相机初始化失败", Toast.LENGTH_SHORT).show()
+                return@Runnable
+            }
+
+            // 相机选择
+            val cameraSelector = CameraSelector.Builder().requireLensFacing(CameraSelector.LENS_FACING_BACK).build()
+
+            // 预览builder
+            val preViewBuilder = Preview.Builder()
+            // 设置预览外部扩展
+            setPreviewExtender(preViewBuilder, cameraSelector)
+            preView = preViewBuilder
+                // 设置宽高比
+                .setTargetAspectRatio(screenAspectRatio)
+                // 设置当前屏幕的旋转
+                .setTargetRotation(rotation)
                 .build()
 
-            imageCapture = ImageCapture.Builder()
+            // 拍照builder
+            val imgCaptureBuilder = ImageCapture.Builder()
+            // 设置拍照外部扩展
+            setImageCaptureExtender(imgCaptureBuilder, cameraSelector)
+            imageCapture = imgCaptureBuilder
+                // 优化捕获速度，但是可能会降低照片质量
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                // 设置宽高比
+                .setTargetAspectRatio(screenAspectRatio)
+                // 设置初始旋转角度
+                .setTargetRotation(rotation)
+                .build()
+
+            // 视频builder
+            videoCapture = VideoCapture.Builder()
+                // 设置宽高比
+                .setTargetAspectRatio(screenAspectRatio)
+                // 设置当前旋转
+                .setTargetRotation(rotation)
+                // 分辨率
+                .setVideoFrameRate(25)
+                // bit率
+                .setAudioBitRate(3 * 1024 * 1024)
                 .build()
 
             imageAnalyzer = ImageAnalysis.Builder()
+                .setTargetAspectRatio(screenAspectRatio)
+                .setTargetRotation(rotation)
                 .build()
                 .also {
                     it.setAnalyzer(cameraExecutor, LuminosityAnalyzer {lum ->
@@ -125,12 +192,11 @@ class CameraActivity: AppCompatActivity() {
                     })
                 }
 
-            val cameraSelector = CameraSelector.Builder().requireLensFacing(CameraSelector.LENS_FACING_BACK).build()
 
             try {
                 cameraProvider.unbindAll()
 
-                camera = cameraProvider.bindToLifecycle(this, cameraSelector, preView, imageCapture, imageAnalyzer)
+                camera = cameraProvider.bindToLifecycle(this, cameraSelector, preView, imageCapture, videoCapture, imageAnalyzer)
 
                 preView?.setSurfaceProvider(previewView?.createSurfaceProvider())
 
@@ -145,10 +211,10 @@ class CameraActivity: AppCompatActivity() {
         val imageCapture = imageCapture ?: return
         val photoFile = File(photoOutputDirectory, SimpleDateFormat(FILENAME_FORMAT, Locale.US).format(System.currentTimeMillis()) + ".jpg")
 
-        val outputOption = ImageCapture.OutputFileOptions.Builder(photoFile)
+        val photoOutputOption = ImageCapture.OutputFileOptions.Builder(photoFile)
             .build()
 
-        imageCapture.takePicture(outputOption, ContextCompat.getMainExecutor(this), object : ImageCapture.OnImageSavedCallback {
+        imageCapture.takePicture(photoOutputOption, ContextCompat.getMainExecutor(this), object : ImageCapture.OnImageSavedCallback {
 
             override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                 val saveUrl = Uri.fromFile(photoFile)
@@ -165,11 +231,103 @@ class CameraActivity: AppCompatActivity() {
     }
 
     // 长按录视频
+    @SuppressLint("RestrictedApi")
     private fun takeVideo() {
         val videoCapture = videoCapture ?: return
-        val videoFile = File(videoOutputDirectory, SimpleDateFormat(FILENAME_FORMAT, Locale.US).format(System.currentTimeMillis()) + ".map4")
+        val videoFile = File(videoOutputDirectory, SimpleDateFormat(FILENAME_FORMAT, Locale.US).format(System.currentTimeMillis()) + ".mp4")
+        val videoOutputOption = VideoCapture.OutputFileOptions.Builder(videoFile)
+            .build()
 
+        videoCapture.startRecording(videoOutputOption, ContextCompat.getMainExecutor(this), object : VideoCapture.OnVideoSavedCallback {
 
+            override fun onVideoSaved(outputFileResults: VideoCapture.OutputFileResults) {
+                val saveUrl = Uri.fromFile(videoFile)
+                val msg = "Video capture succeeded: $saveUrl"
+                Toast.makeText(baseContext, msg, Toast.LENGTH_SHORT).show()
+                Log.d(TAG, msg)
+            }
+
+            override fun onError(videoCaptureError: Int, message: String, cause: Throwable?) {
+                Log.e(TAG, "Video capture failed: $message")
+            }
+        })
+    }
+
+    // 获取宽高比
+    private fun aspectRatio(widthPixels: Int, heightPixels: Int): Int {
+        val preViewRatio = max(widthPixels, heightPixels).toDouble() / min(widthPixels, heightPixels).toDouble()
+        if (abs(preViewRatio - RATIO_4_3_VALUE) <= abs(preViewRatio - RATIO_16_9_VALUE)) {
+            return AspectRatio.RATIO_4_3
+        }
+        return AspectRatio.RATIO_16_9
+    }
+
+    // 给预览设置外部扩展
+    private fun setPreviewExtender(builder: Preview.Builder, cameraSelector: CameraSelector) {
+
+        // 自动模式
+        val autoPreviewExtender = AutoPreviewExtender.create(builder)
+        if (autoPreviewExtender.isExtensionAvailable(cameraSelector)) {
+            autoPreviewExtender.enableExtension(cameraSelector)
+        }
+
+        // 散景模式
+        val bokehPreviewExtender = BokehPreviewExtender.create(builder)
+        if (bokehPreviewExtender.isExtensionAvailable(cameraSelector)) {
+            bokehPreviewExtender.enableExtension(cameraSelector)
+        }
+
+        // HDR模式
+        val hdrPreviewExtender = HdrPreviewExtender.create(builder)
+        if (hdrPreviewExtender.isExtensionAvailable(cameraSelector)) {
+            hdrPreviewExtender.enableExtension(cameraSelector)
+        }
+
+        // 美颜模式
+        val beautyPreviewExtender = BeautyPreviewExtender.create(builder)
+        if (beautyPreviewExtender.isExtensionAvailable(cameraSelector)) {
+            beautyPreviewExtender.enableExtension(cameraSelector)
+        }
+
+        // 夜晚模式
+        val nightPreviewExtender = NightPreviewExtender.create(builder)
+        if (nightPreviewExtender.isExtensionAvailable(cameraSelector)) {
+            nightPreviewExtender.enableExtension(cameraSelector)
+        }
+    }
+
+    // 给拍照设置外部扩展
+    private fun setImageCaptureExtender(builder: ImageCapture.Builder, cameraSelector: CameraSelector) {
+
+        // 自动模式
+        val autoImageCaptureExtender = AutoImageCaptureExtender.create(builder)
+        if (autoImageCaptureExtender.isExtensionAvailable(cameraSelector)) {
+            autoImageCaptureExtender.enableExtension(cameraSelector)
+        }
+
+        // 散景模式
+        val bokehImageCaptureExtender = BokehImageCaptureExtender.create(builder)
+        if (bokehImageCaptureExtender.isExtensionAvailable(cameraSelector)) {
+            bokehImageCaptureExtender.enableExtension(cameraSelector)
+        }
+
+        // HDR模式
+        val hdrImageCaptureExtender = HdrImageCaptureExtender.create(builder)
+        if (hdrImageCaptureExtender.isExtensionAvailable(cameraSelector)) {
+            hdrImageCaptureExtender.enableExtension(cameraSelector)
+        }
+
+        // 美颜模式
+        val beautyImageCaptureExtender = BeautyImageCaptureExtender.create(builder)
+        if (beautyImageCaptureExtender.isExtensionAvailable(cameraSelector)) {
+            beautyImageCaptureExtender.enableExtension(cameraSelector)
+        }
+
+        // 夜晚模式
+        val nightImageCaptureExtender = NightImageCaptureExtender.create(builder)
+        if (nightImageCaptureExtender.isExtensionAvailable(cameraSelector)) {
+            nightImageCaptureExtender.enableExtension(cameraSelector)
+        }
     }
 
     private fun allPermissionGranted() = REQUIRED_PERMISSIONS.all {
