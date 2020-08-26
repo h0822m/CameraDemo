@@ -5,10 +5,10 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/white"
+    android:background="@color/black"
     tools:context=".MainActivity">
 
-    <androidx.camera.view.PreviewView
+    <androidx.camera.view.CameraView
         android:id="@+id/previewView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -36,25 +36,13 @@
         app:layout_constraintTop_toTopOf="parent"
         app:srcCompat="@drawable/ic_flash_auto"/>
 
-    <ImageButton
+    <com.xw.cameraxdemo.view.PictureAndRecordView
         android:id="@+id/camera_btn"
-        android:layout_width="72dp"
-        android:layout_height="72dp"
-        android:layout_margin="24dp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_width="80dp"
+        android:layout_height="80dp"
+        android:layout_marginBottom="40dp"
         app:layout_constraintStart_toStartOf="parent"
-        android:scaleType="fitCenter"
-        android:background="@null"
-        app:srcCompat="@drawable/ic_shutter" />
-
-<!--    <com.xw.cameraxdemo.view.PictureAndRecordView-->
-<!--        android:id="@+id/camera_btn"-->
-<!--        android:layout_width="80dp"-->
-<!--        android:layout_height="80dp"-->
-<!--        android:layout_marginBottom="40dp"-->
-<!--        app:layout_constraintStart_toStartOf="parent"-->
-<!--        app:layout_constraintEnd_toEndOf="parent"-->
-<!--        app:layout_constraintBottom_toBottomOf="parent"/>-->
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"/>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

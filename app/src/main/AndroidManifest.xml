@@ -22,7 +22,16 @@
 
         <activity
             android:name=".view.CameraActivity"
-            android:theme="@style/FullScreen"/>
+            android:label="CameraActivity"/>
+
+        <activity
+            android:name=".view.CameraVideoActivity"
+            android:label="CameraVideoActivity"/>
+
+        <activity
+            android:name=".view.PreViewActivity"
+            android:label="PreViewActivity"/>
+
     </application>
 
 </manifest>

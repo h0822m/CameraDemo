@@ -8,7 +8,9 @@ import android.os.Build
 import android.os.Bundle
 import android.util.DisplayMetrics
 import android.util.Log
+import android.view.MenuItem
 import android.view.Surface
+import android.widget.ImageButton
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.*
@@ -36,7 +38,17 @@ typealias LumListener = (lum: Double) -> Unit
  */
 class CameraActivity: AppCompatActivity() {
 
+    // 拍照与录视频自定义按钮
     private lateinit var cameraRecordView: PictureAndRecordView
+    // 拍照按钮
+    private lateinit var cameraBtn: ImageButton
+    // 相机转换按钮
+    private lateinit var cameraSwitchBtn: ImageButton
+    // 闪光转换按钮
+    private lateinit var flashSwitchBtn: ImageButton
+    // 默认自动闪光模式
+    private var flashMode = 0
+    private val flashIconArray = arrayOf(R.drawable.ic_flash_auto, R.drawable.ic_flash_on, R.drawable.ic_flash_off)
     private var preView: Preview? = null
     private var camera: Camera? = null
     private var previewView: PreviewView? = null
@@ -51,6 +63,8 @@ class CameraActivity: AppCompatActivity() {
     private lateinit var cameraExecutor: ExecutorService
     // 是否拍照
     private var isTakePicture = false
+    // CameraSelector
+    private var lensFacing = CameraSelector.LENS_FACING_BACK
 
     companion object {
         private const val TAG = "CameraXBasic"
@@ -66,11 +80,22 @@ class CameraActivity: AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_camera_x)
 
+        // 导航栏返回键
+        val actionBar = supportActionBar
+        actionBar?.let {
+            it.setHomeButtonEnabled(true)
+            it.setDisplayHomeAsUpEnabled(true)
+        }
+
         // 相机单线程
         cameraExecutor = Executors.newSingleThreadExecutor()
 
-        cameraRecordView = findViewById(R.id.camera_btn)
+//        cameraRecordView = findViewById(R.id.camera_btn)
+        cameraBtn = findViewById(R.id.camera_btn)
         previewView = findViewById(R.id.previewView)
+        cameraSwitchBtn = findViewById(R.id.camera_switch_btn)
+        flashSwitchBtn = findViewById(R.id.camera_flash_btn)
+
         if (Build.VERSION.SDK_INT <= 22) {
             starCamera()
         }
@@ -80,34 +105,76 @@ class CameraActivity: AppCompatActivity() {
         } else {
             ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS)
         }
+        // 由于官方api bind lifecycle 不支持多个UseCase 弃用这种方案
+//        cameraRecordView.setOnPictureAndRecordListener(object : OnPictureAndRecordListener {
+//
+//            override fun onTakePicture() {
+//                isTakePicture = true
+//                // 点击拍照
+//                takePhoto()
+//            }
+//
+//            override fun onRecordVideo() {
+//                isTakePicture = false
+//                // 长按录制视频
+//                takeVideo()
+//            }
+//
+//            @SuppressLint("RestrictedApi")
+//            override fun onFinish() {
+//                // 视频录制完成
+//                videoCapture?.stopRecording()
+//            }
+//
+//        })
 
-        cameraRecordView.setOnPictureAndRecordListener(object : OnPictureAndRecordListener {
-
-            override fun onTakePicture() {
-                isTakePicture = true
-                // 点击拍照
-                takePhoto()
+        // 相机拍摄方向
+        cameraSwitchBtn.setOnClickListener {
+            lensFacing = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+                CameraSelector.LENS_FACING_BACK
+            } else {
+                CameraSelector.LENS_FACING_FRONT
             }
+            starCamera()
+        }
 
-            override fun onRecordVideo() {
-                isTakePicture = false
-                // 长按录制视频
-                takeVideo()
-            }
+        // 闪光
+        flashSwitchBtn.setOnClickListener {
+            flashMode = (flashMode + 1) % 3
+            flashSwitchBtn.setImageResource(flashIconArray[flashMode])
+            imageCapture?.flashMode = getMode(flashMode)
+        }
 
-            @SuppressLint("RestrictedApi")
-            override fun onFinish() {
-                // 视频录制完成
-                videoCapture?.stopRecording()
-            }
-
-        })
+        cameraBtn.setOnClickListener {
+            // 拍照
+            takePhoto()
+        }
 
         // 照片存储文件
         photoOutputDirectory = getPhotoOutputDirectory()
 
         // 视频存储文件
         videoOutputDirectory = getVideoOutputDirectory()
+    }
+
+    // 返回键事件
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        when(item.itemId) {
+            android.R.id.home -> {
+                finish()
+                return true
+            }
+        }
+        return super.onOptionsItemSelected(item)
+    }
+
+    private fun getMode(position: Int): Int {
+        return when(position) {
+            0 -> ImageCapture.FLASH_MODE_AUTO
+            1 -> ImageCapture.FLASH_MODE_ON
+            2 -> ImageCapture.FLASH_MODE_OFF
+            else -> ImageCapture.FLASH_MODE_AUTO
+        }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -125,85 +192,85 @@ class CameraActivity: AppCompatActivity() {
     private fun starCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
 
-        cameraProviderFuture.addListener(Runnable {
-            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+        try {
+            cameraProviderFuture.addListener(Runnable {
+                val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
 
-            // 获取屏幕的分辨率
-            val displayMetrics = DisplayMetrics()
-            previewView?.display?.getRealMetrics(displayMetrics)
+                // 获取屏幕的分辨率
+                val displayMetrics = DisplayMetrics()
+                previewView?.display?.getRealMetrics(displayMetrics)
 
-            // 获取宽高比
-            val screenAspectRatio = aspectRatio(displayMetrics.widthPixels, displayMetrics.heightPixels)
+                // 获取宽高比
+                val screenAspectRatio = aspectRatio(displayMetrics.widthPixels, displayMetrics.heightPixels)
 
-            // 旋转方向
-            val rotation = previewView?.display?.rotation ?: Surface.ROTATION_0
+                // 旋转方向
+                val rotation = previewView?.display?.rotation ?: Surface.ROTATION_0
 
-            if (cameraProvider == null) {
-                Toast.makeText(this, "相机初始化失败", Toast.LENGTH_SHORT).show()
-                return@Runnable
-            }
-
-            // 相机选择
-            val cameraSelector = CameraSelector.Builder().requireLensFacing(CameraSelector.LENS_FACING_BACK).build()
-
-            // 预览builder
-            val preViewBuilder = Preview.Builder()
-            // 设置预览外部扩展
-            setPreviewExtender(preViewBuilder, cameraSelector)
-            preView = preViewBuilder
-                // 设置宽高比
-                .setTargetAspectRatio(screenAspectRatio)
-                // 设置当前屏幕的旋转
-                .setTargetRotation(rotation)
-                .build()
-
-            // 拍照builder
-            val imgCaptureBuilder = ImageCapture.Builder()
-            // 设置拍照外部扩展
-            setImageCaptureExtender(imgCaptureBuilder, cameraSelector)
-            imageCapture = imgCaptureBuilder
-                // 优化捕获速度，但是可能会降低照片质量
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                // 设置宽高比
-                .setTargetAspectRatio(screenAspectRatio)
-                // 设置初始旋转角度
-                .setTargetRotation(rotation)
-                .build()
-
-            // 视频builder
-            videoCapture = VideoCapture.Builder()
-                // 设置宽高比
-                .setTargetAspectRatio(screenAspectRatio)
-                // 设置当前旋转
-                .setTargetRotation(rotation)
-                // 分辨率
-                .setVideoFrameRate(25)
-                // bit率
-                .setAudioBitRate(3 * 1024 * 1024)
-                .build()
-
-            imageAnalyzer = ImageAnalysis.Builder()
-                .setTargetAspectRatio(screenAspectRatio)
-                .setTargetRotation(rotation)
-                .build()
-                .also {
-                    it.setAnalyzer(cameraExecutor, LuminosityAnalyzer {lum ->
-                        Log.d(TAG, "Average luminosity: $lum")
-                    })
+                if (cameraProvider == null) {
+                    Toast.makeText(this, "相机初始化失败", Toast.LENGTH_SHORT).show()
+                    return@Runnable
                 }
 
+                // 相机选择
+                val cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
 
-            try {
+                // 预览builder
+                val preViewBuilder = Preview.Builder()
+                // 设置预览外部扩展
+                setPreviewExtender(preViewBuilder, cameraSelector)
+                preView = preViewBuilder
+                    // 设置宽高比
+                    .setTargetAspectRatio(screenAspectRatio)
+                    // 设置当前屏幕的旋转
+                    .setTargetRotation(rotation)
+                    .build()
+
+                // 拍照builder
+                val imgCaptureBuilder = ImageCapture.Builder()
+                // 设置拍照外部扩展
+                setImageCaptureExtender(imgCaptureBuilder, cameraSelector)
+                imageCapture = imgCaptureBuilder
+                    // 优化捕获速度，但是可能会降低照片质量
+                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                    // 设置宽高比
+                    .setTargetAspectRatio(screenAspectRatio)
+                    // 设置初始旋转角度
+                    .setTargetRotation(rotation)
+                    .build()
+
+                // 视频builder
+                videoCapture = VideoCapture.Builder()
+                    // 设置宽高比
+                    .setTargetAspectRatio(screenAspectRatio)
+                    // 设置当前旋转
+                    .setTargetRotation(rotation)
+                    // 分辨率
+                    .setVideoFrameRate(25)
+                    // bit率
+                    .setAudioBitRate(3 * 1024 * 1024)
+                    .build()
+
+                imageAnalyzer = ImageAnalysis.Builder()
+                    .setTargetAspectRatio(screenAspectRatio)
+                    .setTargetRotation(rotation)
+                    .build()
+                    .also {
+                        it.setAnalyzer(cameraExecutor, LuminosityAnalyzer {lum ->
+                            Log.d(TAG, "Average luminosity: $lum")
+                        })
+                    }
+
                 cameraProvider.unbindAll()
-
-                camera = cameraProvider.bindToLifecycle(this, cameraSelector, preView, imageCapture, videoCapture, imageAnalyzer)
+                // 目前官方api不支持这样的bind，弃用该种方案来拍照和录视频
+                camera = cameraProvider.bindToLifecycle(this, cameraSelector, preView, imageCapture, /*videoCapture,*/ imageAnalyzer)
 
                 preView?.setSurfaceProvider(previewView?.createSurfaceProvider())
 
-            } catch (e: Exception) {
-                Log.e(TAG, "Use case binding failed", e)
-            }
-        }, ContextCompat.getMainExecutor(this))
+            }, ContextCompat.getMainExecutor(this))
+        } catch (e: Exception) {
+            Log.e(TAG, "Use case binding failed", e)
+            e.printStackTrace()
+        }
     }
 
     // 点击拍照
